@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador de Regla y Compás Virtual</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        #app-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            padding: 1rem;
+            background-color: #ffffff;
+            border-radius: 1.5rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            max-width: 95vw;
+            width: 100%;
+        }
+        #canvas-container {
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            border: 1px solid #e5e7eb;
+            border-radius: 1rem;
+            overflow: hidden;
+            position: relative;
+            background-color: #fff;
+        }
+        #main-canvas {
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+        #controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            justify-content: center;
+        }
+        .tool-button {
+            padding: 0.75rem 1.5rem;
+            background-color: #f3f4f6;
+            color: #4b5563;
+            font-weight: 600;
+            border-radius: 9999px;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.2s, color 0.2s, transform 0.1s;
+        }
+        .tool-button:hover {
+            background-color: #e5e7eb;
+        }
+        .tool-button:active {
+            transform: scale(0.98);
+        }
+        .tool-button.active {
+            background-color: #3b82f6;
+            color: #ffffff;
+        }
+        #info-box {
+            background-color: #dbeafe;
+            color: #1e40af;
+            padding: 0.75rem 1.25rem;
+            border-radius: 0.75rem;
+            text-align: center;
+            font-weight: 600;
+            min-height: 2.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        @media (min-width: 768px) {
+            #app-container {
+                flex-direction: row;
+                max-width: 1000px;
+            }
+            #canvas-container {
+                flex: 1;
+            }
+            #controls {
+                flex-direction: column;
+                justify-content: flex-start;
+                align-items: stretch;
+                flex: 0 0 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div id="app-container">
+    <div id="canvas-container">
+        <canvas id="main-canvas"></canvas>
+    </div>
+    
+    <div class="flex flex-col gap-4 w-full md:w-auto">
+        <div id="controls" class="md:flex-col">
+            <button id="ruler-tool" class="tool-button">Regla</button>
+            <button id="compass-tool" class="tool-button">Compás</button>
+            <button id="measure-tool" class="tool-button">Medir Distancia</button>
+            <button id="toggle-grid" class="tool-button">Cuadrícula</button>
+            <button id="clear-canvas" class="tool-button">Limpiar</button>
+            <a href="#" id="save-image" class="tool-button text-center no-underline hover:no-underline">Guardar Imagen</a>
+        </div>
+        <div id="info-box">Selecciona una herramienta para comenzar.</div>
+    </div>
+</div>
+
+<script>
+    // Obtener los elementos del DOM
+    const canvas = document.getElementById('main-canvas');
+    const ctx = canvas.getContext('2d');
+    const rulerBtn = document.getElementById('ruler-tool');
+    const compassBtn = document.getElementById('compass-tool');
+    const measureBtn = document.getElementById('measure-tool'); // Nuevo botón de medición
+    const toggleGridBtn = document.getElementById('toggle-grid');
+    const clearBtn = document.getElementById('clear-canvas');
+    const saveLink = document.getElementById('save-image');
+    const infoBox = document.getElementById('info-box');
+
+    // Estado de la aplicación
+    let currentTool = 'none';
+    let isDrawing = false;
+    let points = [];
+    let lines = [];
+    let circles = [];
+    let measurements = []; // Nuevo array para guardar mediciones
+    let showGrid = true;
+    let tempPoint = null;
+    let tempLine = null;
+    let tempCircle = null;
+    let tempMeasurementPoints = []; // Puntos temporales para la medición
+    let canvasWidth, canvasHeight;
+    const gridSpacing = 20;
+    const pixelsPerCm = 20;
+    let nextLabelIndex = 0;
+
+    // Clase para representar un punto
+    class Point {
+        constructor(x, y, label) {
+            this.x = x;
+            this.y = y;
+            this.label = label;
+        }
+    }
+
+    // Clase para representar una línea
+    class Line {
+        constructor(p1, p2) {
+            this.p1 = p1;
+            this.p2 = p2;
+            this.distance = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+        }
+    }
+
+    // Clase para representar un círculo
+    class Circle {
+        constructor(center, radiusPoint) {
+            this.center = center;
+            this.radius = Math.sqrt(Math.pow(radiusPoint.x - center.x, 2) + Math.pow(radiusPoint.y - center.y, 2));
+        }
+    }
+    
+    // Clase para representar una medición
+    class Measurement {
+        constructor(p1, p2) {
+            this.p1 = p1;
+            this.p2 = p2;
+            this.distance = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+        }
+    }
+
+    // --- Funciones de dibujo ---
+
+    // Dibuja la cuadrícula
+    function drawGrid() {
+        if (!showGrid) return;
+        ctx.beginPath();
+        ctx.strokeStyle = '#e5e7eb';
+        ctx.lineWidth = 1;
+
+        // Líneas verticales
+        for (let x = 0; x < canvasWidth; x += gridSpacing) {
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvasHeight);
+        }
+
+        // Líneas horizontales
+        for (let y = 0; y < canvasHeight; y += gridSpacing) {
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvasWidth, y);
+        }
+
+        ctx.stroke();
+        ctx.closePath();
+    }
+
+    // Dibuja todos los elementos guardados
+    function drawAll() {
+        // Limpiar el canvas
+        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+        
+        drawGrid();
+
+        // Dibujar líneas
+        ctx.strokeStyle = '#4b5563';
+        ctx.lineWidth = 2;
+        lines.forEach(l => {
+            ctx.beginPath();
+            ctx.moveTo(l.p1.x, l.p1.y);
+            ctx.lineTo(l.p2.x, l.p2.y);
+            ctx.stroke();
+        });
+
+        // Dibujar círculos
+        ctx.strokeStyle = '#4b5563';
+        ctx.lineWidth = 2;
+        circles.forEach(c => {
+            ctx.beginPath();
+            ctx.arc(c.center.x, c.center.y, c.radius, 0, 2 * Math.PI);
+            ctx.stroke();
+        });
+
+        // Dibujar las mediciones
+        ctx.fillStyle = '#4b5563';
+        ctx.font = 'bold 12px Inter';
+        measurements.forEach(m => {
+            const lengthCm = m.distance / pixelsPerCm;
+            const midX = (m.p1.x + m.p2.x) / 2;
+            const midY = (m.p1.y + m.p2.y) / 2;
+            const text = `Longitud ${m.p1.label}${m.p2.label}: ${lengthCm.toFixed(2)} cm`;
+            ctx.fillText(text, midX, midY - 5);
+        });
+        
+        // Dibujar puntos y sus etiquetas
+        ctx.fillStyle = '#1f2937';
+        ctx.font = 'bold 12px Inter';
+        points.forEach(p => {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 4, 0, 2 * Math.PI);
+            ctx.fill();
+            // Dibujar la etiqueta
+            ctx.fillText(p.label, p.x + 8, p.y - 8);
+        });
+
+        // Dibujar el elemento temporal
+        if (tempLine) {
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(tempLine.p1.x, tempLine.p1.y);
+            ctx.lineTo(tempLine.p2.x, tempLine.p2.y);
+            ctx.stroke();
+            infoBox.textContent = 'Arrastra para definir el segundo punto de la regla.';
+        }
+        if (tempCircle) {
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(tempCircle.center.x, tempCircle.center.y, tempCircle.radius, 0, 2 * Math.PI);
+            ctx.stroke();
+            const radiusCm = tempCircle.radius / pixelsPerCm;
+            infoBox.textContent = `Radio desde el punto ${tempCircle.center.label}: ${radiusCm.toFixed(2)} cm`;
+        }
+
+        // Si se están seleccionando puntos para medir, resaltarlos
+        if (currentTool === 'measure' && tempMeasurementPoints.length > 0) {
+            ctx.fillStyle = '#3b82f6';
+            ctx.beginPath();
+            ctx.arc(tempMeasurementPoints[0].x, tempMeasurementPoints[0].y, 6, 0, 2 * Math.PI);
+            ctx.fill();
+        }
+    }
+
+    // --- Funciones de gestión del canvas ---
+
+    // Ajusta el tamaño del canvas
+    function resizeCanvas() {
+        const container = document.getElementById('canvas-container');
+        canvasWidth = container.clientWidth;
+        canvasHeight = container.clientHeight;
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+        drawAll();
+    }
+
+    // Obtiene la posición del cursor ajustada a la cuadrícula
+    function getMousePos(event) {
+        const rect = canvas.getBoundingClientRect();
+        let x = event.clientX - rect.left;
+        let y = event.clientY - rect.top;
+        // Ajustar a la cuadrícula
+        if (showGrid) {
+            x = Math.round(x / gridSpacing) * gridSpacing;
+            y = Math.round(y / gridSpacing) * gridSpacing;
+        }
+        return { x, y };
+    }
+
+    // Genera la siguiente etiqueta alfabética (A, B, C...)
+    function getNextLabel() {
+        const charCode = 'A'.charCodeAt(0) + nextLabelIndex;
+        nextLabelIndex++;
+        return String.fromCharCode(charCode);
+    }
+
+    // Encuentra un punto cercano al clic del ratón
+    function findClickedPoint(x, y) {
+        for (let p of points) {
+            const distance = Math.sqrt(Math.pow(p.x - x, 2) + Math.pow(p.y - y, 2));
+            if (distance < 10) { // Radio de 10px para la detección de clics
+                return p;
+            }
+        }
+        return null;
+    }
+    
+    // --- Manejadores de eventos de la aplicación ---
+
+    // Click en los botones de herramienta
+    function handleToolClick(event) {
+        // Remover la clase 'active' de todos los botones
+        document.querySelectorAll('.tool-button').forEach(btn => btn.classList.remove('active'));
+        
+        currentTool = event.currentTarget.id.replace('-tool', '');
+        event.currentTarget.classList.add('active');
+        isDrawing = false;
+        tempPoint = null;
+        tempLine = null;
+        tempCircle = null;
+        tempMeasurementPoints = [];
+        drawAll();
+        // Restaurar el índice de la etiqueta para la próxima acción
+        nextLabelIndex = points.length;
+
+        switch (currentTool) {
+            case 'ruler':
+                infoBox.textContent = `Haz clic para establecer el primer punto de la regla (${String.fromCharCode('A'.charCodeAt(0) + nextLabelIndex)}).`;
+                break;
+            case 'compass':
+                infoBox.textContent = `Haz clic para establecer el centro del compás (${String.fromCharCode('A'.charCodeAt(0) + nextLabelIndex)}).`;
+                break;
+            case 'measure':
+                infoBox.textContent = 'Selecciona dos puntos para medir la distancia.';
+                break;
+            default:
+                infoBox.textContent = 'Selecciona una herramienta para comenzar.';
+                break;
+        }
+    }
+
+    // Manejar el clic del ratón en el canvas
+    function handleMouseDown(event) {
+        if (currentTool === 'none') return;
+        isDrawing = true;
+        const { x, y } = getMousePos(event);
+
+        if (currentTool === 'ruler') {
+            if (!tempPoint) {
+                const newLabel = getNextLabel();
+                tempPoint = new Point(x, y, newLabel);
+                points.push(tempPoint);
+                infoBox.textContent = `Arrastra para definir el segundo punto de la regla. Este será el punto ${String.fromCharCode('A'.charCodeAt(0) + nextLabelIndex)}.`;
+            } else {
+                const newLabel = getNextLabel();
+                const newPoint = new Point(x, y, newLabel);
+                points.push(newPoint);
+                lines.push(new Line(tempPoint, newPoint));
+                infoBox.textContent = `Línea creada: ${tempPoint.label}${newLabel}.`;
+                tempPoint = null;
+                isDrawing = false;
+                tempLine = null;
+            }
+        } else if (currentTool === 'compass') {
+            if (!tempPoint) {
+                const newLabel = getNextLabel();
+                tempPoint = new Point(x, y, newLabel);
+                points.push(tempPoint);
+                infoBox.textContent = `Arrastra para definir el radio del compás.`;
+            } else {
+                const newPoint = new Point(x, y);
+                circles.push(new Circle(tempPoint, newPoint));
+                const radiusCm = circles[circles.length - 1].radius / pixelsPerCm;
+                infoBox.textContent = `Círculo creado desde el punto ${tempPoint.label} con radio: ${radiusCm.toFixed(2)} cm`;
+                tempPoint = null;
+                isDrawing = false;
+                tempCircle = null;
+            }
+        } else if (currentTool === 'measure') {
+            const clickedPoint = findClickedPoint(x, y);
+            if (clickedPoint) {
+                tempMeasurementPoints.push(clickedPoint);
+                if (tempMeasurementPoints.length === 1) {
+                    infoBox.textContent = `Punto ${tempMeasurementPoints[0].label} seleccionado. Selecciona un segundo punto.`;
+                } else if (tempMeasurementPoints.length === 2) {
+                    measurements.push(new Measurement(tempMeasurementPoints[0], tempMeasurementPoints[1]));
+                    const lengthCm = measurements[measurements.length - 1].distance / pixelsPerCm;
+                    infoBox.textContent = `Distancia ${tempMeasurementPoints[0].label}${tempMeasurementPoints[1].label}: ${lengthCm.toFixed(2)} cm`;
+                    tempMeasurementPoints = []; // Reiniciar
+                }
+            } else {
+                infoBox.textContent = 'No se seleccionó un punto. Intenta de nuevo.';
+                tempMeasurementPoints = [];
+            }
+        }
+        drawAll();
+    }
+
+    // Manejar el movimiento del ratón en el canvas
+    function handleMouseMove(event) {
+        if (!isDrawing || currentTool === 'none') return;
+        const { x, y } = getMousePos(event);
+
+        if (currentTool === 'ruler' && tempPoint) {
+            tempLine = new Line(tempPoint, new Point(x, y));
+        } else if (currentTool === 'compass' && tempPoint) {
+            tempCircle = new Circle(tempPoint, new Point(x, y));
+        }
+        drawAll();
+    }
+
+    // Manejar el final del arrastre del ratón
+    function handleMouseUp() {
+        if (!isDrawing || currentTool === 'none') return;
+        isDrawing = false;
+        drawAll();
+    }
+    
+    // --- Manejadores de botones de control ---
+
+    // Toggle de la cuadrícula
+    function toggleGrid() {
+        showGrid = !showGrid;
+        toggleGridBtn.textContent = showGrid ? 'Ocultar Cuadrícula' : 'Mostrar Cuadrícula';
+        drawAll();
+    }
+
+    // Limpiar el canvas
+    function clearCanvas() {
+        points = [];
+        lines = [];
+        circles = [];
+        measurements = [];
+        tempPoint = null;
+        tempLine = null;
+        tempCircle = null;
+        tempMeasurementPoints = [];
+        nextLabelIndex = 0;
+        drawAll();
+        infoBox.textContent = 'Canvas limpiado. Selecciona una herramienta para comenzar.';
+        document.querySelectorAll('.tool-button').forEach(btn => btn.classList.remove('active'));
+        currentTool = 'none';
+    }
+    
+    // Guardar la imagen del canvas
+    function saveCanvas() {
+        const dataURL = canvas.toDataURL('image/png');
+        saveLink.href = dataURL;
+        saveLink.download = 'construccion_geometrica.png';
+    }
+
+    // --- Inicialización y eventos ---
+
+    window.addEventListener('load', () => {
+        resizeCanvas();
+        drawAll();
+        infoBox.textContent = 'Selecciona una herramienta para comenzar.';
+    });
+
+    window.addEventListener('resize', resizeCanvas);
+
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseup', handleMouseUp);
+    
+    rulerBtn.addEventListener('click', handleToolClick);
+    compassBtn.addEventListener('click', handleToolClick);
+    measureBtn.addEventListener('click', handleToolClick);
+    toggleGridBtn.addEventListener('click', toggleGrid);
+    clearBtn.addEventListener('click', clearCanvas);
+    saveLink.addEventListener('click', saveCanvas);
+
+</script>
+
+</body>
+</html>
